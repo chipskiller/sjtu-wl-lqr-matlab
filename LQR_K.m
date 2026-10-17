@@ -57,7 +57,7 @@ equ4 = (m_w*R_w*l_c + I_w*l_c/R_w + m_l*R_w*l_c)*ddot_theta_w_l + (m_w*R_w*l_c +
 equ5 = (0.5*I_z*R_w/R_l + I_w*R_l/R_w)*ddot_theta_w_l - (0.5*I_z*R_w/R_l + I_w*R_l/R_w)*ddot_theta_w_r + 0.5*I_z*l_l/R_l*ddot_theta_l_l - 0.5*I_z*l_r/R_l*ddot_theta_l_r - T_w_l*R_l/R_w + T_w_r*R_l/R_w;
 
 % 解状态量二阶表达式（s和phi的二阶表达式在运动学部分已转化为以下量）
-[ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b, ] = solve([equ1, equ2, equ3, equ4, equ5], [ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b]);
+[ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b, ] = solve([equ1, equ2, equ3, equ4, equ5], [ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b])
 
 % s和phi的运动学二阶表达式
 ddot_s = 0.5*R_w*(ddot_theta_w_l + ddot_theta_w_r);
