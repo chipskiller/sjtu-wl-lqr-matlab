@@ -57,7 +57,7 @@ equ4 = (m_w*R_w*l_c + I_w*l_c/R_w + m_l*R_w*l_c)*ddot_theta_w_l + (m_w*R_w*l_c +
 equ5 = (0.5*I_z*R_w/R_l + I_w*R_l/R_w)*ddot_theta_w_l - (0.5*I_z*R_w/R_l + I_w*R_l/R_w)*ddot_theta_w_r + 0.5*I_z*l_l/R_l*ddot_theta_l_l - 0.5*I_z*l_r/R_l*ddot_theta_l_r - T_w_l*R_l/R_w + T_w_r*R_l/R_w;
 
 % 解状态量二阶表达式（s和phi的二阶表达式在运动学部分已转化为以下量）
-[ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b, ] = solve([equ1, equ2, equ3, equ4, equ5], [ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b])
+[ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b] = solve([equ1, equ2, equ3, equ4, equ5], [ddot_theta_w_l, ddot_theta_w_r, ddot_theta_l_l, ddot_theta_l_r, ddot_theta_b])
 
 % s和phi的运动学二阶表达式
 ddot_s = 0.5*R_w*(ddot_theta_w_l + ddot_theta_w_r);
@@ -72,181 +72,142 @@ u = [T_w_l, T_w_r, T_b_l, T_b_r];
 Ja = jacobian(dot_x, x)
 Jb = jacobian(dot_x, u)
 
-%% 物理参数赋值
+%% 物理参数赋值 (数值与符号分开命名, 不覆盖符号变量)
 % ─── 车奉朝轮腿模型物理参数 ────────────────────────────
 %  来源: robot.xml  +  env.py + 估算
 % ─────────────────────────────────────────────────────────
 
-g   = 9.81;      % 重力加速度 [m/s^2]
-m_b = 8.4;       % 机体质量 [kg]              base mass="8.4"
-m_w = 0.322;     % 单个驱动轮质量 [kg]         wheel_right/left mass="0.322"
-m_l = 2.751;     % 单腿总质量 [kg]             AG+GH+AB+BE+EC+CF = 0.667+1.64+0.202+0.057+0.128+0.057
-R_w = 0.077;     % 驱动轮半径 [m]              env.py wheel_r=0.77dm
-R_l = 0.20;      % 驱动轮半轮距 [m]            XML髋关节 Y≈±0.20
-l_c = 0.10;      % 机体CoM到髋关节距离 [m]      估计值, 需实测
+g_val   = 9.81;      % 重力加速度 [m/s^2]
+m_b_val = 8.4;       % 机体质量 [kg]              base mass="8.4"
+m_w_val = 0.322;     % 单个驱动轮质量 [kg]         wheel_right/left mass="0.322"
+m_l_val = 2.751;     % 单腿总质量 [kg]             AG+GH+AB+BE+EC+CF = 0.667+1.64+0.202+0.057+0.128+0.057
+R_w_val = 0.077;     % 驱动轮半径 [m]              env.py wheel_r=0.77dm
+R_l_val = 0.20;      % 驱动轮半轮距 [m]            XML髋关节 Y≈±0.20
+l_c_val = 0.10;      % 机体CoM到髋关节距离 [m]      估计值, 需实测
 
 % ── 惯量参数 (MuJoCo由mesh自动计算, 未显式给定, 以下为估计) ──
-I_w = 0.0020;    % 驱动轮转动惯量 [kg·m^2]      1/2*m_w*R_w^2 ≈ 0.001, 略加裕量
-I_l_l = 0.015;   % 左腿绕髋转动惯量 [kg·m^2]     m_l*L^2/3 量级
-I_l_r = 0.015;   % 右腿绕髋转动惯量 [kg·m^2]     m_l*L^2/3 量级
-I_b = 0.15;      % 机体俯仰转动惯量 [kg·m^2]     1/12*m_b*体长^2 量级
-I_z = 0.10;      % 机体yaw转动惯量 [kg·m^2]       ≈ I_b * 0.7
+I_w_val = 0.0020;    % 驱动轮转动惯量 [kg·m^2]      1/2*m_w*R_w^2 ≈ 0.001, 略加裕量
+I_b_val = 0.15;      % 机体俯仰转动惯量 [kg·m^2]     1/12*m_b*体长^2 量级
+I_z_val = 0.10;      % 机体yaw转动惯量 [kg·m^2]       ≈ I_b * 0.7
+%  I_l_l / I_l_r 是随腿长变化的符号变量, 不在此赋值, 在循环内由 I_l = k_I*l + b_I 计算
 
-%% LQR计算和拟合
+%% LQR计算与多项式拟合
+% 依据《上海交通大学RoboMaster2023平衡步兵控制系统开源》WBR_control.html:
+%   (2.1) A(l_l,l_r) = K_A1 + K_A2*l_l + K_A3*l_l^2 + K_A4*l_r + K_A5*l_r^2 + K_A6*l_l*l_r
+%   (2.2) B(l_l,l_r) = K_B1 + K_B2*l_l + K_B3*l_l^2 + K_B4*l_r + K_B5*l_r^2 + K_B6*l_l*l_r
+%   (3.5) K(l_l,l_r) = K_K1 + K_K2*l_l + K_K3*l_l^2 + K_K4*l_r + K_K5*l_r^2 + K_K6*l_l*l_r
+% 三条多项式的系数统一按公式下标顺序存放 (第 1..6 项):
+%   1:常数项  2:l_l  3:l_l^2  4:l_r  5:l_r^2  6:l_l*l_r
+% 该顺序与上交文档公式下标一一对应, 便于把系数原样导出到嵌入式代码中按同一顺序求值。
 
-% Step 0: 代入固定物理参数 (给除了和腿长相关的参数赋值）
-% 剩余符号: l_l, l_r, l_w_l, l_w_r, l_b_l, l_b_r, I_l_l, I_l_r
-params_fixed = [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z];
-Ja_fixed = subs(Ja, params_fixed);
-Jb_fixed = subs(Jb, params_fixed);
+%% Step 0: 代入固定物理参数
+% 符号变量 g, m_b, ... 未被覆盖, 直接用符号名→数值代入
+% 说明: 本模型方程已是小角度线性形式, A、B 与状态量/控制量的值无关, 无需代入 0。
+Ja_fixed = subs(Ja, [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z], ...
+                    [g_val, m_b_val, m_w_val, m_l_val, R_w_val, R_l_val, l_c_val, I_w_val, I_b_val, I_z_val]);
+Jb_fixed = subs(Jb, [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z], ...
+                    [g_val, m_b_val, m_w_val, m_l_val, R_w_val, R_l_val, l_c_val, I_w_val, I_b_val, I_z_val]);
 
-
-% 腿长相关参数用 y = kx + b 线性近似 (上交 (1.1)~(1.3), 系数需根据本模型五连杆标定)
-%   I_l(l) = k_I * l + b_I
-%   l_b(l) = k_lb * l + b_lb
-%   l_w(l) = l - l_b = (1 - k_lb)*l - b_lb
+%% 随腿长变化的腿部参数近似 (上交文档 WBR_control.html (1.1)~(1.3))
+%   (1.1) 单侧腿平面转动惯量  I_l ≈ 0.4  *l + 0.07
+%   (1.2) 腿部质心到髋距离    l_b ≈ 0.218*l + 0.075
+%   (1.3) 髋到腿部质心距离    l_w = l - l_b ≈ 0.782*l - 0.075
+% 斜率/截距用 y = k*x + b 形式表示, 系数需按本模型五连杆实测标定(此处沿用上交开源值)
 k_I  = 0.4;    b_I  = 0.07;
 k_lb = 0.218;  b_lb = 0.075;
 
-% Q/R 权重矩阵
+%% LQR 代价函数权重
+% J = ∫(x'Qx + u'Ru)dt, Q 为 10 个状态量权重, R 为 4 个控制量权重
+% diag(v): 由向量 v 生成对角矩阵(对角元为 v, 其余元素为 0)
 Q_cost = diag([1, 1, 1, 1, 10, 1, 10, 1, 100, 10]);
 R_cost = diag([1, 1, 1, 1]);
 
-% ═══════════════════════════════════════════════════════════════
-% 第一阶段：拟合 A(l_l,l_r) 和 B(l_l,l_r) 多项式 （上交 2.1）
-%   多项式形式（每个矩阵元素 6 个系数）：
-%     A(l_l,l_r) = K_A1 + K_A2*l_l + K_A3*l_l² + K_A4*l_r + K_A5*l_r² + K_A6*l_l*l_r
-%     B(l_l,l_r) = K_B1 + K_B2*l_l + K_B3*l_l² + K_B4*l_r + K_B5*l_r² + K_B6*l_l*l_r
-%   流程：左右腿长范围内按步长全排列 → 每点算 A,B 数值 → 最小二乘拟合 6 系数
-% ═══════════════════════════════════════════════════════════════
+%% 系数顺序转换
+% fit(...,'poly22') 返回的曲面模型系数顺序为 [p00 p10 p01 p20 p11 p02],
+% 即 [常数, l_l, l_r, l_l^2, l_l*l_r, l_r^2], 与上交文档顺序不同;
+% 下面的匿名函数把 6 个系数重排成文档顺序 [1 2 4 3 6 5],
+% 即 [常数, l_l, l_l^2, l_r, l_r^2, l_l*l_r]
+% 匿名函数写法: f = @(入参) 表达式, 之后可像普通函数一样调用 f(...)
+reorder22 = @(c) c([1, 2, 4, 3, 6, 5]);
 
-% 腿长范围（左右独立，便于后期不对称扩展）
-l_l_min = 0.08;   l_l_max = 0.30;   % 左腿长范围 [m]
-l_r_min = 0.08;   l_r_max = 0.30;   % 右腿长范围 [m]
-leg_step = 0.02;                      % 离散A/B采样步长 [m]
+%% 第一阶段: 采样 (A,B), 拟合 A(l_l,l_r)、B(l_l,l_r)   [文档 (2.1)(2.2)]
+l_min = 0.08;   l_max = 0.30;      % 左右腿长工作区间 [m]
+step_ab = 0.02;                    % 采样步长 [m]
 
-% 生成左右腿长的全排列网格 → 每个 (l_l, l_r) 组合都参与A/B拟合
-l_l_vec = l_l_min:leg_step:l_l_max;
-l_r_vec = l_r_min:leg_step:l_r_max;
-[l_l_grid, l_r_grid] = meshgrid(l_l_vec, l_r_vec);   % 2D网格, 左右腿长所有排列组合
-l_l_flat = l_l_grid(:);                              % 展开为列向量
-l_r_flat = l_r_grid(:);
-n_pts = length(l_l_flat);                            % 总采样点数
+% meshgrid: 生成所有 (l_l,l_r) 组合; (:): 按列优先拉直成列向量
+[LL, LR] = meshgrid(l_min:step_ab:l_max);
+LL = LL(:);  LR = LR(:);
+n_ab = numel(LL);                  % 采样点总数
 
-% 存储每点的 A(:) 和 B(:) —— 每行是一个 (l_l,l_r) 对应的矩阵展开
-A_stack = zeros(n_pts, 100);   % 10×10 展开为 100 列
-B_stack = zeros(n_pts, 40);    % 10×4 展开为 40 列
+% zeros(...): 生成全零数组, 用于预分配内存
+% 用三维数组存矩阵(第 3 维是"页"), 避免把矩阵拉直后算线性下标出错
+A_s = zeros(n_ab,10,10);           % 第 k 页存一个 10×10 的 A
+B_s = zeros(n_ab,10,4);            % 第 k 页存一个 10×4  的 B
+for k = 1:n_ab
+    li = LL(k);  ri = LR(k);       % 当前左右腿长
+    % 由当前腿长算出随腿长变化的 4 个数值参数; 变量名加前缀以区别于符号变量
+    % (lb_l≈l_b_l, lw_l≈l_w_l, Il_l≈I_l_l, 切勿写成 l_b_l... 否则会覆盖符号)
+    lb_l = k_lb*li + b_lb;   lb_r = k_lb*ri + b_lb;
+    lw_l = li - lb_l;        lw_r = ri - lb_r;
+    Il_l = k_I*li + b_I;     Il_r = k_I*ri + b_I;
 
-fprintf('=== 阶段一：离散采样 %d 个 (l_l,l_r) 点, 计算 A/B ===\n', n_pts);
-for i = 1:n_pts
-    li = l_l_flat(i);          % 当前左腿长
-    ri = l_r_flat(i);          % 当前右腿长
-
-    % 由腿长计算腿的质心位置、转动惯量 (y = kx + b 线性近似)
-    l_b_l = k_lb*li + b_lb;    l_b_r = k_lb*ri + b_lb;   % 腿质心位置
-    l_w_l = li - l_b_l;        l_w_r = ri - l_b_r;        % 轮心到腿质心
-    I_l_l = k_I*li + b_I;      I_l_r = k_I*ri + b_I;      % 腿转动惯量
-
-    % 代入腿长相关参数 → 符号矩阵变为纯数值
-    A_num = double(subs(Ja_fixed, ...
-        [l_l, l_r, l_w_l, l_w_r, l_b_l, l_b_r, I_l_l, I_l_r], ...
-        [li, ri, l_w_l, l_w_r, l_b_l, l_b_r, I_l_l, I_l_r]));
-    B_num = double(subs(Jb_fixed, ...
-        [l_l, l_r, l_w_l, l_w_r, l_b_l, l_b_r, I_l_l, I_l_r], ...
-        [li, ri, l_w_l, l_w_r, l_b_l, l_b_r, I_l_l, I_l_r]));
-
-    A_stack(i, :) = A_num(:)';     % 展开存为一行
-    B_stack(i, :) = B_num(:)';
+    % subs(S,old,new): 用 new 替换符号表达式 S 中的 old(符号变量);
+    % double(...): 把符号结果转换成双精度数值矩阵, 整个矩阵直接存入第 k 页
+    A_s(k,:,:) = double(subs(Ja_fixed, ...
+        [l_l l_r l_w_l l_w_r l_b_l l_b_r I_l_l I_l_r], ...
+        [li  ri  lw_l  lw_r  lb_l  lb_r  Il_l  Il_r]));
+    B_s(k,:,:) = double(subs(Jb_fixed, ...
+        [l_l l_r l_w_l l_w_r l_b_l l_b_r I_l_l I_l_r], ...
+        [li  ri  lw_l  lw_r  lb_l  lb_r  Il_l  Il_r]));
 end
 
-% 构造 2D 二次多项式设计矩阵 X: 每行 = [1, l_l, l_l², l_r, l_r², l_l·l_r]
-% 对矩阵每个元素做最小二乘: coeff = X \ y, 得到该元素的 6 个多项式系数
-X_ab = [ones(n_pts,1), l_l_flat, l_l_flat.^2, l_r_flat, l_r_flat.^2, l_l_flat.*l_r_flat];
-
-fprintf('  对 A, B 每个元素做最小二乘拟合 (每个元素 → 6 系数)...\n');
-K_A = zeros(10, 10, 6);   % A 矩阵每个元素的 6 个多项式系数
-K_B = zeros(10, 4, 6);    % B 矩阵每个元素的 6 个多项式系数
-
-for row = 1:10
-    for col = 1:10
-        idx = (row-1)*10 + col;           % 矩阵元素 → 在展开向量中的列索引
-        K_A(row, col, :) = X_ab \ A_stack(:, idx);  % 最小二乘解 6 系数
+% 逐元素拟合: 对 A、B 的每个元素在 (l_l,l_r) 平面上做二元二次拟合, 取 6 个系数
+% fit([X Y],Z,'poly22'): 曲线拟合工具箱的曲面拟合, X、Y 为两个自变量, Z 为函数值;
+%   'poly22' 表示二元二次多项式 p00+p10*x+p01*y+p20*x^2+p11*x*y+p02*y^2
+% coeffvalues(fitobj): 取出拟合对象的系数向量
+K_A = zeros(10,10,6);    % A 每个元素(r,c)的 6 个多项式系数(文档顺序)
+for r = 1:10
+    for c = 1:10
+        % A_s(:,r,c) 取所有采样点下 A 的第 (r,c) 个元素, 沿腿长做曲面拟合
+        K_A(r,c,:) = reorder22(coeffvalues(fit([LL LR], A_s(:,r,c), 'poly22')));
     end
 end
-for row = 1:10
-    for col = 1:4
-        idx = (row-1)*4 + col;
-        K_B(row, col, :) = X_ab \ B_stack(:, idx);
+
+K_B = zeros(10,4,6);     % B 每个元素的 6 个多项式系数(文档顺序)
+for r = 1:10
+    for c = 1:4
+        K_B(r,c,:) = reorder22(coeffvalues(fit([LL LR], B_s(:,r,c), 'poly22')));
     end
 end
-fprintf('  阶段一完成: K_A(10×10×6), K_B(10×4×6)\n');
+fprintf('阶段一完成: 已拟合 A(l_l,l_r)、B(l_l,l_r) (系数按文档顺序)\n');
 
-% ═══════════════════════════════════════════════════════════════
-% 第二阶段：用拟合的 A(l_l,l_r), B(l_l,l_r) 在稠密网格上计算 K（上交 3.1）
-%   多项式形式（K 的每个元素 6 个系数）：
-%     K(l_l,l_r) = K_K1 + K_K2*l_l + K_K3*l_l² + K_K4*l_r + K_K5*l_r² + K_K6*l_l*l_r
-%   流程：左右腿长全排列（步长低于阶段一）→ 每点用A/B多项式快速求A,B → lqrd得K → 最小二乘拟合K
-% ═══════════════════════════════════════════════════════════════
+%% 第二阶段: 用 A(l_l,l_r)、B(l_l,l_r) 求 K, 再拟合 K(l_l,l_r)   [文档 (3.5)]
+step_k = 0.01;                          % 第二阶段网格步长(比第一阶段更密)
+[LLk, LRk] = meshgrid(l_min:step_k:l_max);
+LLk = LLk(:);  LRk = LRk(:);
+n_k = numel(LLk);
 
-leg_step_k = 0.01;                                   % K采样步长 [m], 比阶段一的 leg_step(0.02) 更密
-% 生成左右腿长的全排列网格（步长更密，点数更多）
-l_l_k_vec = l_l_min:leg_step_k:l_l_max;
-l_r_k_vec = l_r_min:leg_step_k:l_r_max;
-[l_l_k_grid, l_r_k_grid] = meshgrid(l_l_k_vec, l_r_k_vec);  % 所有 (l_l,l_r) 排列组合
-l_l_k_flat = l_l_k_grid(:);
-l_r_k_flat = l_r_k_grid(:);
-n_k_pts = length(l_l_k_flat);
+K_s = zeros(n_k,4,10);                  % 第 k 页存一个 4×10 的 K
+for k = 1:n_k
+    li = LLk(k);  ri = LRk(k);
 
-K_stack = zeros(n_k_pts, 40);   % 4×10 展开为 40 列, 每行一个 (l_l,l_r)
+    % 按 (2.1)(2.2) 还原当前腿长下的 A、B (对 10×10 / 10×4 数组整体运算)
+    A = K_A(:,:,1) + K_A(:,:,2)*li + K_A(:,:,3)*li^2 + K_A(:,:,4)*ri + K_A(:,:,5)*ri^2 + K_A(:,:,6)*li*ri;
+    B = K_B(:,:,1) + K_B(:,:,2)*li + K_B(:,:,3)*li^2 + K_B(:,:,4)*ri + K_B(:,:,5)*ri^2 + K_B(:,:,6)*li*ri;
 
-fprintf('=== 阶段二：稠密采样 %d 个 (l_l,l_r) 点, 用 A,B 多项式快速计算 K ===\n', n_k_pts);
-for i = 1:n_k_pts
-    li = l_l_k_flat(i);         % 当前左腿长
-    ri = l_r_k_flat(i);         % 当前右腿长
-
-    % 用阶段一拟合的 K_A,K_B 多项式，快速计算当前腿长下的 A, B 矩阵
-    % basis = [1, l_l, l_l², l_r, l_r², l_l·l_r], 点乘 6 系数即得该元素值
-    basis = [1, li, li^2, ri, ri^2, li*ri];
-    A_fit = zeros(10, 10);
-    B_fit = zeros(10, 4);
-    for row = 1:10
-        for col = 1:10
-            A_fit(row, col) = sum(squeeze(K_A(row, col, :))' .* basis);  % A(row,col) = Σ 系数_i * basis_i
-        end
-    end
-    for row = 1:10
-        for col = 1:4
-            B_fit(row, col) = sum(squeeze(K_B(row, col, :))' .* basis);
-        end
-    end
-
-    % 用重构的 A, B 计算离散 LQR 增益 (Ts=0.001)
-    K_mat = lqrd(A_fit, B_fit, Q_cost, R_cost, 0.001);
-    K_stack(i, :) = K_mat(:)';    % 4×10 → 1×40 行向量, 存入一行
+    % lqrd(A,B,Q,R,Ts): 离散线性二次调节器(discrete LQR)求解, Ts 为采样周期;
+    %   返回状态反馈矩阵 K(4×10), 满足 u = -K*x
+    K_s(k,:,:) = lqrd(A, B, Q_cost, R_cost, 0.001);
 end
 
-% 对 K 的每个元素做最小二乘拟合：K(row,col) = f(l_l,l_r) 的 6 系数
-% 设计矩阵与阶段一相同: [1, l_l, l_l², l_r, l_r², l_l·l_r]
-X_k = [ones(n_k_pts,1), l_l_k_flat, l_l_k_flat.^2, l_r_k_flat, l_r_k_flat.^2, l_l_k_flat.*l_r_k_flat];
-K_K = zeros(4, 10, 6);    % K 矩阵每个元素的 6 个多项式系数
-for row = 1:4
-    for col = 1:10
-        idx = (row-1)*10 + col;           % K(row,col) → 在 K_stack 中的列号
-        K_K(row, col, :) = X_k \ K_stack(:, idx);  % 最小二乘解 6 系数
+K_K = zeros(4,10,6);                    % K 每个元素(r,c)的 6 个多项式系数(文档顺序)
+for r = 1:4
+    for c = 1:10
+        K_K(r,c,:) = reorder22(coeffvalues(fit([LLk LRk], K_s(:,r,c), 'poly22')));
     end
 end
-fprintf('  阶段二完成: K_K(4×10×6)\n');
+fprintf('阶段二完成: 已拟合 K(l_l,l_r) (系数按文档顺序)\n');
 
-% ═══════════════════════════════════════════════
-% 验证：用 K_K 多项式重建某腿长下的 K 矩阵
-% ═══════════════════════════════════════════════
-l_test = 0.20;
-basis_test = [1, l_test, l_test^2, l_test, l_test^2, l_test*l_test];
-K_test = zeros(4, 10);
-for row = 1:4
-    for col = 1:10
-        K_test(row, col) = sum(squeeze(K_K(row, col, :))' .* basis_test);
-    end
-end
-fprintf('\n腿长 l=%.2f m 时的 LQR 反馈增益 K (4 控制 × 10 状态):\n', l_test);
-disp(K_test);
+%% 导出系数 (顺序: [常数, l_l, l_l^2, l_r, l_r^2, l_l*l_r])
+save('LQR_K_coeff.mat', 'K_A', 'K_B', 'K_K');
+fprintf('完成: K_A(10,10,6), K_B(10,4,6), K_K(4,10,6) 已保存到 LQR_K_coeff.mat\n');
