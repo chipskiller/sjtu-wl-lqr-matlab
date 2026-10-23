@@ -30,21 +30,56 @@ syms F_wh_l F_wh_r; % 驱动轮对腿竖直方向作用力
 syms F_bs_l F_bs_r; % 腿对机体水平方向作用力
 syms F_bh_l F_bh_r; % 腿对机体竖直方向作用力
 
-% 参数
+% 参数 ------------------
 syms g; % 重力加速度
+
 syms R_w; % 驱动轮半径
 syms R_l; % 驱动轮轮距/2
+
 syms l_l l_r; % 腿部长度
-syms l_w_l l_w_r; % 驱动轮到腿部质心距离*1
-syms l_b_l l_b_r; % 机体质心到腿部质心距离*1
+syms l_w_l l_w_r; % 驱动轮到腿部质心距离*1 (1.3)
+syms l_b_l l_b_r; % 机体质心到腿部质心距离*1 (1.2)
 syms l_c; % 机体质心到腿部关节距离
+
 syms m_w; % 驱动轮质量
 syms m_l; % 腿部质量
 syms m_b; % 机体质量
+
 syms I_w; % 驱动轮转动惯量
-syms I_l_l I_l_r; % 腿部转动惯量
+syms I_l_l I_l_r; % 腿部转动惯量(1.1)
 syms I_b; % 机体转动惯量
 syms I_z; % 机体yaw转动惯量
+
+%% 1、机器人参数
+% ─── 车奉朝轮腿模型物理参数 ────────────────────────────
+%  来源: robot.xml  +  env.py + 估算
+% ─────────────────────────────────────────────────────────
+g_val   = 9.81;      % 重力加速度 [m/s^2]
+
+R_w_val = 0.077;     % 驱动轮半径 [m]              env.py wheel_r=0.77dm
+R_l_val = 0.20;      % 驱动轮半轮距 [m]            XML髋关节 Y≈±0.20
+
+l_c_val = 0.10;      % 机体CoM到髋关节距离 [m]      估计值, 需实测
+
+
+m_w_val = 0.322;     % 单个驱动轮质量 [kg]         wheel_right/left mass="0.322"
+m_l_val = 2.751;     % 单腿总质量 [kg]             AG+GH+AB+BE+EC+CF = 0.667+1.64+0.202+0.057+0.128+0.057
+m_b_val = 8.4;       % 机体质量 [kg]              base mass="8.4"
+
+% ── 惯量参数 (MuJoCo由mesh自动计算, 未显式给定, 以下为估计) ──
+I_w_val = 0.0020;    % 驱动轮转动惯量 [kg·m^2]      1/2*m_w*R_w^2 ≈ 0.001, 略加裕量
+% I_l_l / I_l_r 是随腿长变化的符号变量, 不在此赋值, 在循环内由 I_l = k_I*l + b_I 计算
+I_b_val = 0.15;      % 机体俯仰转动惯量 [kg·m^2]     1/12*m_b*体长^2 量级
+I_z_val = 0.10;      % 机体yaw转动惯量 [kg·m^2]       ≈ I_b * 0.7
+
+%% 随腿长变化的腿部参数近似 (上交文档 WBR_control.html (1.1)~(1.3))
+%   (1.1) 单侧腿平面转动惯量  I_l ≈ 0.4  *l + 0.07
+%   (1.2) 腿部质心到髋距离    l_b ≈ 0.218*l + 0.075
+%   (1.3) 髋到腿部质心距离    l_w = l - l_b ≈ k_lw*l + b_lw
+% 斜率/截距用 y = k*x + b 形式表示, 系数需按本模型五连杆实测标定(此处沿用上交开源值)
+k_Il  = 0.4;    b_Il  = 0.07; % (1.1)  I_l ≈ k_I*l + b_I
+k_lb = 0.218;  b_lb = 0.075; % (1.2)  l_b ≈ k_lb*l + b_lb
+k_lw = 1 - k_lb;  b_lw = -b_lb; % (1.3)  l_w = l - l_b ≈ k_lw*l + b_lw
 
 %% 状态空间方程
 % 通过建模方程，得到对于每个状态量的符号表达式，再分别对每个状态量方程求各个状态量的偏导，得到10*10的雅可比矩阵A和10*4的雅可比矩阵B，代入线性化点，得到A和B的数值矩阵，最后通过lqr函数计算K矩阵。
@@ -72,25 +107,6 @@ u = [T_w_l, T_w_r, T_b_l, T_b_r];
 Ja = jacobian(dot_x, x)
 Jb = jacobian(dot_x, u)
 
-%% 物理参数赋值 (数值与符号分开命名, 不覆盖符号变量)
-% ─── 车奉朝轮腿模型物理参数 ────────────────────────────
-%  来源: robot.xml  +  env.py + 估算
-% ─────────────────────────────────────────────────────────
-
-g_val   = 9.81;      % 重力加速度 [m/s^2]
-m_b_val = 8.4;       % 机体质量 [kg]              base mass="8.4"
-m_w_val = 0.322;     % 单个驱动轮质量 [kg]         wheel_right/left mass="0.322"
-m_l_val = 2.751;     % 单腿总质量 [kg]             AG+GH+AB+BE+EC+CF = 0.667+1.64+0.202+0.057+0.128+0.057
-R_w_val = 0.077;     % 驱动轮半径 [m]              env.py wheel_r=0.77dm
-R_l_val = 0.20;      % 驱动轮半轮距 [m]            XML髋关节 Y≈±0.20
-l_c_val = 0.10;      % 机体CoM到髋关节距离 [m]      估计值, 需实测
-
-% ── 惯量参数 (MuJoCo由mesh自动计算, 未显式给定, 以下为估计) ──
-I_w_val = 0.0020;    % 驱动轮转动惯量 [kg·m^2]      1/2*m_w*R_w^2 ≈ 0.001, 略加裕量
-I_b_val = 0.15;      % 机体俯仰转动惯量 [kg·m^2]     1/12*m_b*体长^2 量级
-I_z_val = 0.10;      % 机体yaw转动惯量 [kg·m^2]       ≈ I_b * 0.7
-%  I_l_l / I_l_r 是随腿长变化的符号变量, 不在此赋值, 在循环内由 I_l = k_I*l + b_I 计算
-
 %% LQR计算与多项式拟合
 % 依据《上海交通大学RoboMaster2023平衡步兵控制系统开源》WBR_control.html:
 %   (2.1) A(l_l,l_r) = K_A1 + K_A2*l_l + K_A3*l_l^2 + K_A4*l_r + K_A5*l_r^2 + K_A6*l_l*l_r
@@ -107,14 +123,6 @@ Ja_fixed = subs(Ja, [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z], ...
                     [g_val, m_b_val, m_w_val, m_l_val, R_w_val, R_l_val, l_c_val, I_w_val, I_b_val, I_z_val]);
 Jb_fixed = subs(Jb, [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z], ...
                     [g_val, m_b_val, m_w_val, m_l_val, R_w_val, R_l_val, l_c_val, I_w_val, I_b_val, I_z_val]);
-
-%% 随腿长变化的腿部参数近似 (上交文档 WBR_control.html (1.1)~(1.3))
-%   (1.1) 单侧腿平面转动惯量  I_l ≈ 0.4  *l + 0.07
-%   (1.2) 腿部质心到髋距离    l_b ≈ 0.218*l + 0.075
-%   (1.3) 髋到腿部质心距离    l_w = l - l_b ≈ 0.782*l - 0.075
-% 斜率/截距用 y = k*x + b 形式表示, 系数需按本模型五连杆实测标定(此处沿用上交开源值)
-k_I  = 0.4;    b_I  = 0.07;
-k_lb = 0.218;  b_lb = 0.075;
 
 %% LQR 代价函数权重
 % J = ∫(x'Qx + u'Ru)dt, Q 为 10 个状态量权重, R 为 4 个控制量权重
@@ -147,9 +155,9 @@ for k = 1:n_ab
     li = LL(k);  ri = LR(k);       % 当前左右腿长
     % 由当前腿长算出随腿长变化的 4 个数值参数; 变量名加前缀以区别于符号变量
     % (lb_l≈l_b_l, lw_l≈l_w_l, Il_l≈I_l_l, 切勿写成 l_b_l... 否则会覆盖符号)
-    lb_l = k_lb*li + b_lb;   lb_r = k_lb*ri + b_lb;
-    lw_l = li - lb_l;        lw_r = ri - lb_r;
-    Il_l = k_I*li + b_I;     Il_r = k_I*ri + b_I;
+    lb_l = k_lb*li + b_lb;   lb_r = k_lb*ri + b_lb; % (1.2)  l_b ≈ k_lb*l + b_lb
+    lw_l = li - lb_l;        lw_r = ri - lb_r; % (1.3)  l_w ≈ k_lw*l + b_lw
+    Il_l = k_Il*li + b_Il;     Il_r = k_Il*ri + b_Il; % (1.1)  I_l ≈ k_I*l + b_I
 
     % subs(S,old,new): 用 new 替换符号表达式 S 中的 old(符号变量);
     % double(...): 把符号结果转换成双精度数值矩阵, 整个矩阵直接存入第 k 页
@@ -197,7 +205,7 @@ for k = 1:n_k
 
     % lqrd(A,B,Q,R,Ts): 离散线性二次调节器(discrete LQR)求解, Ts 为采样周期;
     %   返回状态反馈矩阵 K(4×10), 满足 u = -K*x
-    K_s(k,:,:) = lqrd(A, B, Q_cost, R_cost, 0.001);
+    K_s(k,:,:) = lqrd(A, B, Q_cost, R_cost, 0.0005);
 end
 
 K_K = zeros(4,10,6);                    % K 每个元素(r,c)的 6 个多项式系数(文档顺序)
