@@ -127,8 +127,10 @@ Jb_fixed = subs(Jb, [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z], ...
 %% LQR 代价函数权重
 % J = ∫(x'Qx + u'Ru)dt, Q 为 10 个状态量权重, R 为 4 个控制量权重
 % diag(v): 由向量 v 生成对角矩阵(对角元为 v, 其余元素为 0)
-Q_cost = diag([1, 1, 1, 1, 10, 1, 10, 1, 100, 10]);
-R_cost = diag([1, 1, 1, 1]);
+% x = [s, dot_s, phi, dot_phi, theta_l_l, dot_theta_l_l, theta_l_r, dot_theta_l_r, theta_b, dot_theta_b];
+% u = [T_w_l, T_w_r, T_b_l, T_b_r];
+Q_cost = diag([1000, 10, 100, 1, 5000, 0, 5000, 0, 10000, 1]);
+R_cost = diag([100, 100, 0.1, 0.1]);
 
 %% 系数顺序转换
 % fit(...,'poly22') 返回的曲面模型系数顺序为 [p00 p10 p01 p20 p11 p02],
@@ -219,6 +221,9 @@ fprintf('阶段二完成: 已拟合 K(l_l,l_r) (系数按文档顺序)\n');
 %% 导出系数 (顺序: [常数, l_l, l_l^2, l_r, l_r^2, l_l*l_r])
 save('LQR_K_coeff.mat', 'K_A', 'K_B', 'K_K');
 fprintf('完成: K_A(10,10,6), K_B(10,4,6), K_K(4,10,6) 已保存到 LQR_K_coeff.mat\n');
+
+%% 导出到文件
+export_K(K_K, 'c:\Conda\mujoco_wl\b站_车奉朝_腿仿真\wheel_leg_mujoco', 'c:\Conda\mujoco_wl\b站_车奉朝_腿仿真\wheel_leg_mujoco');
 
 % K矩阵
 % val(:,:,1) =
