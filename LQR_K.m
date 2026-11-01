@@ -129,8 +129,8 @@ Jb_fixed = subs(Jb, [g, m_b, m_w, m_l, R_w, R_l, l_c, I_w, I_b, I_z], ...
 % diag(v): 由向量 v 生成对角矩阵(对角元为 v, 其余元素为 0)
 % x = [s, dot_s, phi, dot_phi, theta_l_l, dot_theta_l_l, theta_l_r, dot_theta_l_r, theta_b, dot_theta_b];
 % u = [T_w_l, T_w_r, T_b_l, T_b_r];
-Q_cost = diag([1000, 10, 100, 1, 5000, 0, 5000, 0, 10000, 1]);
-R_cost = diag([100, 100, 0.1, 0.1]);
+Q_cost = diag([100, 1, 200, 0.1, 110, 0.1, 110, 0.1, 1000, 0.1]);
+R_cost = diag([50, 50, 0.01, 0.01]);
 
 %% 系数顺序转换
 % fit(...,'poly22') 返回的曲面模型系数顺序为 [p00 p10 p01 p20 p11 p02],
