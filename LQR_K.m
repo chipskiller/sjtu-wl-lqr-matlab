@@ -223,7 +223,7 @@ save('LQR_K_coeff.mat', 'K_A', 'K_B', 'K_K');
 fprintf('完成: K_A(10,10,6), K_B(10,4,6), K_K(4,10,6) 已保存到 LQR_K_coeff.mat\n');
 
 %% 导出到文件
-export_K(K_K, 'c:\Conda\mujoco_wl\b站_车奉朝_腿仿真\wheel_leg_mujoco', 'c:\Conda\mujoco_wl\b站_车奉朝_腿仿真\wheel_leg_mujoco');
+export_K(K_K, 'c:\Conda\mujoco_wl\b站_车奉朝_腿仿真\wheel_leg_mujoco', 'C:\Users\CHIPS KILLER\Desktop\RM\project-RM\embedded-2027-h7\app\targets\wl_test');
 
 % K矩阵
 % val(:,:,1) =
